@@ -1,3 +1,6 @@
-import config
+import configparser
 
-print(config.org_data_path)
+
+conf = configparser.ConfigParser()
+conf.read("test.conf")
+print(conf.get("win32", "log_dir"))
