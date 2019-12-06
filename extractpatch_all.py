@@ -149,7 +149,13 @@ def do_extract(input_shape,
 def all_extract(config_path):
     c = UConfig(config_path)
 
-    do_extract(c., filepath, "c_ct.mha", out_path, out_txt, islabel=False, mask="c_mask_8.mha",
+    do_extract(c.inputShape,
+               c.outputShape,
+               filepath,
+               out_path,
+               out_txt,
+               islabel=False,
+               mask="c_mask_8.mha",
                stepscale=1)
 
 
