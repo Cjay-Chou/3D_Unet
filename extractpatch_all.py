@@ -3,12 +3,12 @@ import os
 import tensorflow as tf
 from itertools import product
 import numpy as np
-
 import yaml
 import SimpleITK as sitk
 from pathlib import Path
-from keras.utils import to_categorical
+from tensorflow.keras.utils import to_categorical
 from config import UConfig
+import argparse
 
 
 def Padding(image, patchsize, imagepatchsize, mirroring=False):
@@ -63,9 +63,9 @@ def do_extract(input_shape,
         print("done")
 
     totalpatches = [i for i in product(
-                        range(bb[4], bb[5], step[2]),
-                        range(bb[2], bb[3], step[1]),
-                        range(bb[0], bb[1], step[0]))]
+        range(bb[4], bb[5], step[2]),
+        range(bb[2], bb[3], step[1]),
+        range(bb[0], bb[1], step[0]))]
     num_totalpatches = len(totalpatches)
 
     if islabel:
@@ -148,20 +148,38 @@ def do_extract(input_shape,
 
 def all_extract(config_path):
     c = UConfig(config_path)
+    ct_name = c.data_name
+    is_label = ct_name == 'label.mha'
+    extract_list = c.train_list + c.val_list
+    patch_path = c.patch_path
+    list_path = c.list
+    for i in extract_list:
+        abs_path = os.path.join(c.org_data_path, i)
+        ct_abs_path = os.path.join(abs_path, ct_name)
 
-    do_extract(c.inputShape,
-               c.outputShape,
-               filepath,
-               out_path,
-               out_txt,
-               islabel=False,
-               mask="c_mask_8.mha",
-               stepscale=1)
+        list_abs_path = os.path.join(list_path, i)
+        do_extract(c.inputShape,
+                   c.outputShape,
+                   ct_abs_path,
+                   patch_path,
+                   list_abs_path,
+                   islabel=is_label,
+                   mask="c_mask_8.mha",
+                   stepscale=1)
+
+
+def ParseArgs():
+    parser = argparse.ArgumentParser(description='This is a build 3D_U_Net program')
+    parser.add_argument("config_path", help="Input config file")
+    parser.add_argument("-f", "--force", help="over write on old file if exist")
+    parser.add_argument("--noLabel", help="not extract label file", dest='do_label', action='store_false')
+    myargs = parser.parse_args()
+    return myargs
 
 
 if __name__ == '__main__':
-    config_path = "argv"
-    all_extract(config_path)
+    args = ParseArgs()
+    all_extract(args.config_path)
 
     '''
         outpath = "E:/Script_hist/patch/com30/hist" + i + "/"
@@ -186,7 +204,6 @@ if __name__ == '__main__':
                 do_extract(model_path, filepath, "c_ct_hist" + i + ".mha", out_path, out_txt, islabel=False,
                            mask="c_mask_8.mha", stepscale=1)
 '''
-
 
 """
 outpath = "E:/Script_hist/patch/com30-label/"
