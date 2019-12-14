@@ -1,6 +1,7 @@
 import configparser
 import argparse
 import numpy as np
+import os
 
 conf = configparser.ConfigParser()
 conf.read("test.conf")
@@ -18,3 +19,7 @@ for i in range(len(inputs)):
     inputs[i] = int(inputs[i])
 input_arr = np.array(inputs)
 print(inputs)
+ct_name = 'label.mha'
+
+is_label = ct_name == 'label.mha'
+print(is_label)

@@ -11,6 +11,7 @@ class UConfig:
         self.input_shape = self.__get_shape("input_shape")
         self.output_shape = self.__get_shape("output_shape")
         self.data_name = self.conf.get("all", "data_name")
+        self.step_scale = self.conf.get("all", "step_scale")
 
         if sys.platform == "win32":
             self.log_dir = self.conf.get("win32", "log_dir")
@@ -22,10 +23,11 @@ class UConfig:
             self.org_data_path = "ubuntu"
             self.patch_path = "ubuntu"
 
-        self.train_list = self.__get_list("train_list")
-        self.val_list = self.__get_list("val_list")
-        self.test_list = self.__get_list("test_list")
-
+        self.train_list = self.__try_get("train_list")
+        if self.train_list is None:
+            self.train_list = os.listdir(self.org_data_path)
+        self.val_list = self.__try_get("val_list")
+        self.test_list = self.__try_get("test_list")
 
     def __get_shape(self, dtype):
         temp = self.conf.get("all", dtype)

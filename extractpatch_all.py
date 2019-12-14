@@ -1,11 +1,7 @@
-import sys
 import os
-import tensorflow as tf
 from itertools import product
 import numpy as np
-import yaml
 import SimpleITK as sitk
-from pathlib import Path
 from tensorflow.keras.utils import to_categorical
 from config import UConfig
 import argparse
@@ -152,20 +148,22 @@ def all_extract(config_path):
     is_label = ct_name == 'label.mha'
     extract_list = c.train_list + c.val_list
     patch_path = c.patch_path
-    list_path = c.list
+    list_path = c.list_path
+    createParentPath(list_path)
     for i in extract_list:
         abs_path = os.path.join(c.org_data_path, i)
         ct_abs_path = os.path.join(abs_path, ct_name)
-
         list_abs_path = os.path.join(list_path, i)
-        do_extract(c.inputShape,
-                   c.outputShape,
+        out_path = os.path.join(patch_path, i)
+        createParentPath(out_path)
+        do_extract(c.input_shape,
+                   c.output_shape,
                    ct_abs_path,
-                   patch_path,
+                   out_path,
                    list_abs_path,
                    islabel=is_label,
                    mask="c_mask_8.mha",
-                   stepscale=1)
+                   stepscale=c.step_scale)
 
 
 def ParseArgs():
@@ -181,96 +179,3 @@ if __name__ == '__main__':
     args = ParseArgs()
     all_extract(args.config_path)
 
-    '''
-        outpath = "E:/Script_hist/patch/com30/hist" + i + "/"
-        listpath = "E:/Script_hist/list/com30/hist" + i + "/"
-        imagepath = "E:/hist_01/comp30/"
-        createParentPath(outpath)
-        createParentPath(listpath)
-        for num in os.listdir(imagepath):
-
-            filepath = os.path.join(imagepath, num)
-
-            out_path = os.path.join(outpath, "ct" + num)
-            out_txt = os.path.join(listpath, "ct" + num)
-
-            if i == '00':
-                do_extract(model_path, filepath, "c_ct.mha", out_path, out_txt, islabel=False, mask="c_mask_8.mha",
-                           stepscale=1)
-            elif i == 'label':
-                do_extract(model_path, filepath, "c_label_8.mha", out_path, out_txt, islabel=True, mask="c_mask_8.mha",
-                           stepscale=1)
-            else:
-                do_extract(model_path, filepath, "c_ct_hist" + i + ".mha", out_path, out_txt, islabel=False,
-                           mask="c_mask_8.mha", stepscale=1)
-'''
-
-"""
-outpath = "E:/Script_hist/patch/com30-label/"
-listpath = "E:/Script_hist/list/com30-label/"
-createParentPath(outpath)
-createParentPath(listpath)
-imagepath = "E:/hist_01/comp30"
-for num in os.listdir(imagepath):
-    filepath = os.path.join(imagepath,num)
-
-    out_path = os.path.join(outpath,"label"+num)
-    out_txt = os.path.join(listpath,"llabel"+num)
-    do_extract(model_path,filepath,"mask_8.mha",out_path,out_txt,islabel=True,mask="mask_8.mha",stepscale=1)
-
-
-
-
-
-outpath = "E:/Script_hist/patch/label/"
-listpath = "E:/Script_hist/list/label/"
-createParentPath(outpath)
-createParentPath(listpath)
-imagepath = "E:/kits19_inter_processed/"
-for num in mask_file:
-    filepath = os.path.join(imagepath,"case_00"+num)
-
-    out_path = os.path.join(outpath,"label"+num)
-    out_txt = os.path.join(listpath,"llabel"+num)
-    do_extract(model_path,filepath,"mask.mha",out_path,out_txt,islabel=True,mask="mask.mha",stepscale=1)
-
-
-import shutil
-
-for num in mask_file:
-
-    filepath = os.path.join(imagepath,"case_00"+num)
-    filepath2 = os.path.join(imagepath2,"case_00"+num)
-
-    file_path = os.path.join(filepath2,"mask.mha")
-    new_path = os.path.join(filepath,"mask.mha")
-
-    path = shutil.copy(file_path, new_path)
-
-
-for num in mask_val:
-    
-    filepath = os.path.join(imagepath,"case_00"+num)
-    
-     
-    out_path = os.path.join(outpath,"label"+num)
-    out_txt = os.path.join(listpath,"llabel"+num)
-    do_extract(model_path,filepath,"mask.mha",out_path,out_txt,islabel=True,mask="mask.mha",stepscale=1)
-    
-
-
-    out_path = os.path.join(outpath,"ct"+num)
-    out_txt = os.path.join(listpath,"ct"+num)
-    do_extract(model_path,filepath,"ct_hist25.mha",out_path,out_txt,islabel=False,mask="mask.mha",stepscale=1)
-
-
-
-    filepath = os.path.join(imagepath,"case_00"+num)
-
-    out_path = os.path.join(outpath,"label"+num)
-    out_txt = os.path.join(listpath,"llabel"+num)
-    do_extract(model_path,filepath,"mask.mha",out_path,out_txt,islabel=True,mask="mask.mha",stepscale=1)
-
-
-
-"""
