@@ -9,8 +9,8 @@ import argparse
 
 def Padding(image, patchsize, imagepatchsize, mirroring=False):
     padfilter = sitk.MirrorPadImageFilter() if mirroring else sitk.ConstantPadImageFilter()
-    padfilter.SetPadLowerBound(patchsize.tolist())
-    padfilter.SetPadUpperBound(imagepatchsize.tolist())
+    padfilter.SetPadLowerBound(patchsize.tolist()[::-1])
+    padfilter.SetPadUpperBound(imagepatchsize.tolist()[::-1])
     padded_image = padfilter.Execute(image)
     return padded_image
 
@@ -27,6 +27,8 @@ def do_extract(input_shape,
                out_path,  # patch image folder
                out_txt,  # list folder
                islabel=False, mask=None, stepscale=1, step=None):
+
+    # GetSize() is z y x don't use it
     # get patchsize x,y,z
     ps = np.array(output_shape)
     ips = np.array(input_shape)
@@ -35,7 +37,8 @@ def do_extract(input_shape,
     print("loading input image", image_file, end="...", flush=True)
     image = sitk.ReadImage(image_file)
     image_padded = Padding(image, ds, ips, mirroring=True)
-    s = image_padded.GetSize()
+    image_padded_array = sitk.GetArrayFromImage(image_padded)
+    s = image_padded_array.shape
     print("ps:{}, ips:{}, ds:{}, image_padded_s:{}".format(ps, ips, ds, s))
 
     if step is None:
@@ -44,18 +47,17 @@ def do_extract(input_shape,
     bb = None
     maskarry = None
 
-    # GetSize() is z y x
-    bb = (ds[0], ds[0] + image.GetSize()[0] - 1,
-          ds[1], ds[1] + image.GetSize()[1] - 1,
-          ds[2], ds[2] + image.GetSize()[2] - 1)
+    bb = (ds[0], ds[0] + s[0] - 1,
+          ds[1], ds[1] + s[1] - 1,
+          ds[2], ds[2] + s[2] - 1)
     print("bb, x,y,z", bb)
 
     if mask is not None:
         print("loading mask image", mask, end="...", flush=True)
         maskimage = sitk.ReadImage(mask)
         maskimage_padded = Padding(maskimage, ds, ips)
-        print("maskimage_padded shape", maskimage_padded.GetSize())
         maskarry = sitk.GetArrayFromImage(maskimage_padded)
+        print("maskimage_padded shape", maskarry.shape)
         print("done")
 
     totalpatches = [i for i in product(
@@ -65,15 +67,14 @@ def do_extract(input_shape,
     num_totalpatches = len(totalpatches)
 
     if islabel:
-        image_padded_array = sitk.GetArrayFromImage(image_padded)
         array_categorical = to_categorical(image_padded_array)
         i = 1
         j = 1
         arr_path = []
-        for ix in range(bb[4], bb[5], step[2]):
+        for iz in range(bb[4], bb[5], step[2]):
             for iy in range(bb[2], bb[3], step[1]):
-                for iz in range(bb[0], bb[1], step[0]):
-                    p = [iz, iy, ix]
+                for ix in range(bb[0], bb[1], step[0]):
+                    p = [ix, iy, iz]
                     print("patch [{} / {}] : {}".format(i, num_totalpatches, p), end="...", flush=True)
                     i = i + 1
                     ii = [p[0] - ds[0], p[1] - ds[1], p[2] - ds[2]]
@@ -81,34 +82,39 @@ def do_extract(input_shape,
                         print("skipped")
                         continue
                     if maskarry is not None:
-                        if np.sum(maskarry[p[2]:(p[2] + ps[2]), p[1]:(p[1] + ps[1]), p[0]:(p[0] + ps[0])]) < 1:
+                        if np.sum(maskarry[
+                                  p[0]:(p[0] + ps[0]),
+                                  p[1]:(p[1] + ps[1]),
+                                  p[2]:(p[2] + ps[2])]) < 1:
                             print("skipped")
                             continue
 
-                    patchimagearray = array_categorical[ii[2]:(ii[2] + ips[2]), ii[1]:(ii[1] + ips[1]),
-                                      ii[0]:(ii[0] + ips[0]), :]
+                    patchimagearray = array_categorical[
+                                      ii[0]:(ii[0] + ips[0]),
+                                      ii[1]:(ii[1] + ips[1]),
+                                      ii[2]:(ii[2] + ips[2]), :]
                     print(patchimagearray.shape)
                     print("saving cut to", out_path, end="...", flush=True)
-                    createParentPath(out_path)
+
                     outfile = os.path.join(out_path, "image{}.mha".format(j))
 
                     outimage = sitk.GetImageFromArray(patchimagearray.astype(np.uint8))
                     outimage.SetOrigin(image.GetOrigin())
                     outimage.SetSpacing(image.GetSpacing())
                     outimage.SetDirection(image.GetDirection())
-                    sitk.WriteImage(outimage, outfile, True)
+                    sitk.WriteImage(outimage, outfile, False)
                     arr_path.append(outfile + "\n")
 
                     print("done")
                     j = j + 1
-    else:
+    else:  #ct file
         i = 1
         j = 1
         arr_path = []
-        for ix in range(bb[4], bb[5], step[2]):
+        for iz in range(bb[4], bb[5], step[2]):
             for iy in range(bb[2], bb[3], step[1]):
-                for iz in range(bb[0], bb[1], step[0]):
-                    p = [iz, iy, ix]
+                for ix in range(bb[0], bb[1], step[0]):
+                    p = [ix, iy, iz]
                     print("patch [{} / {}] : {}".format(i, num_totalpatches, p), end="...", flush=True)
                     i = i + 1
                     ii = [p[0] - ds[0], p[1] - ds[1], p[2] - ds[2]]
@@ -116,22 +122,19 @@ def do_extract(input_shape,
                         print("skipped")
                         continue
                     if maskarry is not None:
-                        if np.sum(maskarry[p[2]:(p[2] + ps[2]), p[1]:(p[1] + ps[1]), p[0]:(p[0] + ps[0])]) < 1:
+                        if np.sum(maskarry[p[0]:(p[0] + ps[0]), p[1]:(p[1] + ps[1]), p[2]:(p[2] + ps[2])]) < 1:
                             print("skipped")
                             continue
 
-                    patchimage = image_padded[ii[0]:(ii[0] + ips[0]), ii[1]:(ii[1] + ips[1]), ii[2]:(ii[2] + ips[2])]
-                    patchimagearray = sitk.GetArrayFromImage(patchimage)
+                    patchimagearray = image_padded_array[ii[0]:(ii[0] + ips[0]), ii[1]:(ii[1] + ips[1]), ii[2]:(ii[2] + ips[2])]
                     print(patchimagearray.shape)
                     print("saving cut to", out_path, end="...", flush=True)
-                    createParentPath(out_path)
                     outfile = os.path.join(out_path, "image{}.mha".format(j))
-
                     outimage = sitk.GetImageFromArray(patchimagearray)
                     outimage.SetOrigin(image.GetOrigin())
                     outimage.SetSpacing(image.GetSpacing())
                     outimage.SetDirection(image.GetDirection())
-                    sitk.WriteImage(outimage, outfile, True)
+                    sitk.WriteImage(outimage, outfile, False)
                     arr_path.append(outfile + "\n")
 
                     print("done")
@@ -144,15 +147,16 @@ def do_extract(input_shape,
 
 def all_extract(config_path):
     c = UConfig(config_path)
-    ct_name = c.data_name
-    is_label = ct_name == 'label.mha'
-    extract_list = c.train_list + c.val_list
+    is_label = c.data_name == 'label.mha'
+    extract_list = os.listdir(c.org_data_path)
     patch_path = c.patch_path
     list_path = c.list_path
     createParentPath(list_path)
+
     for i in extract_list:
         abs_path = os.path.join(c.org_data_path, i)
-        ct_abs_path = os.path.join(abs_path, ct_name)
+        ct_abs_path = os.path.join(abs_path, c.data_name)
+        mask_abs_path = os.path.join(abs_path, c.mask_name)
         list_abs_path = os.path.join(list_path, i)
         out_path = os.path.join(patch_path, i)
         createParentPath(out_path)
@@ -162,7 +166,7 @@ def all_extract(config_path):
                    out_path,
                    list_abs_path,
                    islabel=is_label,
-                   mask="c_mask_8.mha",
+                   mask=mask_abs_path,
                    stepscale=c.step_scale)
 
 
@@ -178,4 +182,3 @@ def ParseArgs():
 if __name__ == '__main__':
     args = ParseArgs()
     all_extract(args.config_path)
-

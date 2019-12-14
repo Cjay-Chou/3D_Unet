@@ -3,7 +3,6 @@ import os
 import tensorflow as tf
 from itertools import product
 import numpy as np
-
 import yaml
 import SimpleITK as sitk
 from pathlib import Path
@@ -17,10 +16,12 @@ def Padding(image, patchsize, imagepatchsize, mirroring = False):
     padded_image = padfilter.Execute(image)
     return padded_image
 
+
 def createParentPath(filepath):
     if not os.path.exists(filepath):
         os.makedirs(filepath)
         print("path created")
+
 
 def do_extract(modelfile,imagefilepath,file_name,out_path,out_txt,islabel=False,mask=None,stepscale=1):
     

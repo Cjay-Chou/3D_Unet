@@ -13,13 +13,5 @@ except configparser.NoOptionError:
 else:
     print('other error')
 
-input = conf.get("all", "input_shape")
-inputs = input[1:-1].split(',')
-for i in range(len(inputs)):
-    inputs[i] = int(inputs[i])
-input_arr = np.array(inputs)
-print(inputs)
-ct_name = 'label.mha'
-
-is_label = ct_name == 'label.mha'
-print(is_label)
+for i in range(0,100,8):
+    print(i)

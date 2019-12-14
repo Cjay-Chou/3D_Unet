@@ -12,6 +12,10 @@ class UConfig:
         self.output_shape = self.__get_shape("output_shape")
         self.data_name = self.conf.get("all", "data_name")
         self.step_scale = float(self.conf.get("all", "step_scale"))
+        if self.conf.get("all", "mask_name") is 'None':
+            self.mask_name = None
+        else:
+            self.mask_name = self.conf.get("all", "mask_name")
 
         if sys.platform == "win32":
             self.log_dir = self.conf.get("win32", "log_dir")
