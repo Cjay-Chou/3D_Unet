@@ -102,7 +102,7 @@ def do_extract(input_shape,
                     outimage.SetOrigin(image.GetOrigin())
                     outimage.SetSpacing(image.GetSpacing())
                     outimage.SetDirection(image.GetDirection())
-                    sitk.WriteImage(outimage, outfile, False)
+                    sitk.WriteImage(outimage, outfile, True)
                     arr_path.append(outfile + "\n")
 
                     print("done")
@@ -147,7 +147,7 @@ def do_extract(input_shape,
 
 def all_extract(config_path):
     c = UConfig(config_path)
-    is_label = c.data_name == 'label.mha'
+    is_label = c.is_label
     extract_list = os.listdir(c.org_data_path)
     patch_path = c.patch_path
     list_path = c.list_path

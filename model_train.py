@@ -1,4 +1,5 @@
-import sys
+from config import UConfig
+
 import os
 import numpy as np
 import tensorflow as tf
@@ -6,141 +7,93 @@ import SimpleITK as sitk
 from tensorflow.keras import layers as klayers
 from tensorflow import name_scope
 import argparse
-import re
 import random
-import yaml
-
-args = None
-
-def ParseArgs():
-    parser = argparse.ArgumentParser(description='This is a build 3D_U_Net program')
-    parser.add_argument("datafile", help="Input Dataset file(stracture:data_path label_path)")
-    parser.add_argument("-o", "--outfile", help="Output model structure file in YAML format (*.yml).")
-    parser.add_argument("-t","--testfile", help="Input Dataset file for validation (stracture:data_path label_path)")
-    parser.add_argument("-p", "--patchsize", help="Patch size. (ex. 44x44x28)", default="44x44x28")
-    parser.add_argument("-c", "--nclasses", help="Number of classes of segmentaiton including background.", default=14, type=int)
-    parser.add_argument("-e", "--epochs", help="Number of epochs", default=30, type=int)
-    parser.add_argument("-b", "--batchsize", help="Batch size*(Warning:memory use a lot)", default=3, type=int)
-    parser.add_argument("-l", "--learningrate", help="Learning rate", default=1e-4, type=float)
-    parser.add_argument("--weightfile", help="The filename of the trained weight parameters file for fine tuning or resuming.")
-    parser.add_argument("--initialepoch", help="Epoch at which to start training for resuming a previous training", default=0, type=int)
-    parser.add_argument("--logdir", help="Log directory", default='log')
-    parser.add_argument("--nobn", help="Do not use batch normalization layer", dest="use_bn", action='store_false')
-    parser.add_argument("--nodropout", help="Do not use dropout layer", dest="use_dropout", action='store_false')
-    parser.add_argument("-g", "--gpuid", help="ID of GPU to be used for segmentation. [default=0]", default=0, type=int)
-    args = parser.parse_args()
-    return args
 
 
-def CreateConv3DBlock(x, filters, n = 2, use_bn = True, apply_pooling = True, name = 'convblock'):
+def CreateConv3DBlock(x, filters, n=2, use_bn=True, apply_pooling=True, name='convblock'):
     for i in range(n):
-        x = klayers.Conv3D(filters[i], (3,3,3), padding='valid', name=name+'_conv'+str(i+1))(x)
+        x = klayers.Conv3D(filters[i], (3, 3, 3), padding='valid', name=name + '_conv' + str(i + 1))(x)
         if use_bn:
-            x = klayers.BatchNormalization(name=name+'_BN'+str(i+1))(x)
-        x = klayers.Activation('relu', name=name+'_relu'+str(i+1))(x)
+            x = klayers.BatchNormalization(name=name + '_BN' + str(i + 1))(x)
+        x = klayers.Activation('relu', name=name + '_relu' + str(i + 1))(x)
 
     convresult = x
 
     if apply_pooling:
-        x = klayers.MaxPool3D(pool_size=(2,2,2), name=name+'_pooling')(x)
+        x = klayers.MaxPool3D(pool_size=(2, 2, 2), name=name + '_pooling')(x)
 
     return x, convresult
 
 
-def CreateUpConv3DBlock(x, contractpart, filters, n = 2, use_bn = True, name = 'upconvblock'):
+def CreateUpConv3DBlock(x, contractpart, filters, n=2, use_bn=True, name='upconvblock'):
     # upconv x
-    x = klayers.Conv3DTranspose((int)(x.shape[-1]), (2,2,2), strides=(2,2,2), padding='same', use_bias = False, name=name+'_upconv')(x)
+    x = klayers.Conv3DTranspose((int)(x.shape[-1]), (2, 2, 2), strides=(2, 2, 2), padding='same', use_bias=False,
+                                name=name + '_upconv')(x)
     # concatenate contractpart and x
-    c = [(i-j)//2 for (i, j) in zip(contractpart[0].shape[1:4].as_list(), x.shape[1:4].as_list())]
-    contract_crop = klayers.Cropping3D(cropping=((c[0],c[0]),(c[1],c[1]),(c[2],c[2])))(contractpart[0])
+    c = [(i - j) // 2 for (i, j) in zip(contractpart[0].shape[1:4].as_list(), x.shape[1:4].as_list())]
+    contract_crop = klayers.Cropping3D(cropping=((c[0], c[0]), (c[1], c[1]), (c[2], c[2])))(contractpart[0])
     if len(contractpart) > 1:
-        crop1 = klayers.Cropping3D(cropping=((c[0],c[0]),(c[1],c[1]),(c[2],c[2])))(contractpart[1])
-        #crop2 = klayers.Cropping3D(cropping=((c[0],c[0]),(c[1],c[1]),(c[2],c[2])))(contractpart[2])
-        #x = klayers.concatenate([contract_crop, crop1, crop2, x])
+        crop1 = klayers.Cropping3D(cropping=((c[0], c[0]), (c[1], c[1]), (c[2], c[2])))(contractpart[1])
+        # crop2 = klayers.Cropping3D(cropping=((c[0],c[0]),(c[1],c[1]),(c[2],c[2])))(contractpart[2])
+        # x = klayers.concatenate([contract_crop, crop1, crop2, x])
         x = klayers.concatenate([contract_crop, crop1, x])
     else:
         x = klayers.concatenate([contract_crop, x])
 
     # conv x 2 times
     for i in range(n):
-        x = klayers.Conv3D(filters[i], (3,3,3), padding='valid', name=name+'_conv'+str(i+1))(x)
+        x = klayers.Conv3D(filters[i], (3, 3, 3), padding='valid', name=name + '_conv' + str(i + 1))(x)
         if use_bn:
-            x = klayers.BatchNormalization(name=name+'_BN'+str(i+1))(x)
-        x = klayers.Activation('relu', name=name+'_relu'+str(i+1))(x)
+            x = klayers.BatchNormalization(name=name + '_BN' + str(i + 1))(x)
+        x = klayers.Activation('relu', name=name + '_relu' + str(i + 1))(x)
 
     return x
 
-def Construct3DUnetModel(input_images, nclasses, use_bn = True, use_dropout = True):
+
+def Construct3DUnetModel(input_images, nclasses, use_bn=True, use_dropout=True):
     with name_scope("contract1"):
-        x, contract1 = CreateConv3DBlock(input_images, (32, 64), n = 2, use_bn = use_bn, name = 'contract1')
+        x, contract1 = CreateConv3DBlock(input_images, (32, 64), n=2, use_bn=use_bn, name='contract1')
 
     with name_scope("contract2"):
-        x, contract2 = CreateConv3DBlock(x, (64, 128), n = 2, use_bn = use_bn, name = 'contract2')
+        x, contract2 = CreateConv3DBlock(x, (64, 128), n=2, use_bn=use_bn, name='contract2')
 
     with name_scope("contract3"):
-        x, contract3 = CreateConv3DBlock(x, (128, 256), n = 2, use_bn = use_bn, name = 'contract3')
+        x, contract3 = CreateConv3DBlock(x, (128, 256), n=2, use_bn=use_bn, name='contract3')
 
     with name_scope("contract4"):
-        x, _ = CreateConv3DBlock(x, (256, 512), n = 2, use_bn = use_bn, apply_pooling = False, name = 'contract4')
+        x, _ = CreateConv3DBlock(x, (256, 512), n=2, use_bn=use_bn, apply_pooling=False, name='contract4')
 
     with name_scope("dropout"):
         if use_dropout:
             x = klayers.Dropout(0.5, name='dropout')(x)
 
     with name_scope("expand3"):
-        x = CreateUpConv3DBlock(x, [contract3], (256, 256), n = 2, use_bn = use_bn, name = 'expand3')
+        x = CreateUpConv3DBlock(x, [contract3], (256, 256), n=2, use_bn=use_bn, name='expand3')
 
     with name_scope("expand2"):
-        x = CreateUpConv3DBlock(x, [contract2], (128, 128), n = 2, use_bn = use_bn, name = 'expand2')
+        x = CreateUpConv3DBlock(x, [contract2], (128, 128), n=2, use_bn=use_bn, name='expand2')
 
     with name_scope("expand1"):
-        x = CreateUpConv3DBlock(x, [contract1], (64, 64), n = 2, use_bn = use_bn, name = 'expand1')
+        x = CreateUpConv3DBlock(x, [contract1], (64, 64), n=2, use_bn=use_bn, name='expand1')
 
     with name_scope("segmentation"):
         layername = 'segmentation_{}classes'.format(nclasses)
-        x = klayers.Conv3D(nclasses, (1,1,1), activation='softmax', padding='same', name=layername)(x)
+        x = klayers.Conv3D(nclasses, (1, 1, 1), activation='softmax', padding='same', name=layername)(x)
 
     return x
 
-def ReadSliceDataList(filename):
-    datalist = []
-    with open(filename) as f:
-        for line in f:
-            imagefile, labelfile = line.strip().split()
-            datalist.append((imagefile, labelfile))
-
-    return datalist
 
 def dice(y_true, y_pred):
     K = tf.keras.backend
-
     eps = K.constant(1e-6)
     truelabels = tf.argmax(y_true, axis=-1, output_type=tf.int32)
     predictions = tf.argmax(y_pred, axis=-1, output_type=tf.int32)
 
     intersection = K.cast(K.sum(K.minimum(K.cast(K.equal(predictions, truelabels), tf.int32), truelabels)), tf.float32)
-    union = tf.count_nonzero(predictions, dtype=tf.float32) + tf.count_nonzero(truelabels, dtype=tf.float32)
+    union = tf.math.count_nonzero(predictions, dtype=tf.float32) + tf.math.count_nonzero(truelabels, dtype=tf.float32)
     dice = 2 * intersection / (union + eps)
     return dice
 
-def weighted_crossentropy_loss(y_true, y_pred, axis = -1):
-    K = tf.keras.backend
-    y_pred /= tf.reduce_sum(y_pred, axis, True)
-    # manual computation of crossentropy
-    _epsilon = _to_tensor(1e-7, tf.float32)
-    y_pred = tf.clip_by_value(y_pred, _epsilon, 1. - _epsilon)
-
-    weight_y_org = tf.reduce_sum(y_true,[0,1,2,3])
-
-    weight_y_3 = tf.pow(weight_y_org,1.0/3)
-    #weight_y_log = tf.log(weight_y_org+1)
-
-    weight_y = weight_y_3 / tf.reduce_sum(weight_y_3)
-
-    return - tf.reduce_sum( 1 / (weight_y + _epsilon) * y_true * tf.log(y_pred), axis)
-
-def _to_tensor(x, dtype):
-    return tf.convert_to_tensor(x, dtype=dtype)
 
 def ImportImage(filename):
     image = sitk.ReadImage(filename)
@@ -149,9 +102,10 @@ def ImportImage(filename):
         imagearry = imagearry[..., np.newaxis]
     return imagearry
 
-def GenerateBatchData(datalist, paddingsize, batch_size = 32):
-    ps = paddingsize[::-1] # (x, y, z) -> (z, y, x) for np.array
-    #j = 0
+
+def GenerateBatchData(datalist, paddingsize, batch_size=32):
+    ps = paddingsize[::-1]  # (x, y, z) -> (z, y, x) for np.array
+    # j = 0
 
     while True:
         indices = list(range(len(datalist)))
@@ -161,7 +115,7 @@ def GenerateBatchData(datalist, paddingsize, batch_size = 32):
             imagelist = []
             outputlist = []
 
-            for idx in indices[i:i+batch_size]:
+            for idx in indices[i:i + batch_size]:
                 image = ImportImage(datalist[idx][0])
                 onehotlabel = ImportImage(datalist[idx][1])
 
@@ -170,9 +124,10 @@ def GenerateBatchData(datalist, paddingsize, batch_size = 32):
                 outputlist.append(onehotlabel)
 
             yield (np.array(imagelist), np.array(outputlist))
-            
+
+
 class DataGenerator(tf.keras.utils.Sequence):
-    
+
     def __init__(self, datas, paddingsize, batch_size=1, shuffle=True):
         self.batch_size = batch_size
         self.datas = datas
@@ -181,19 +136,18 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.shuffle = shuffle
 
     def __len__(self):
-        #计算每一个epoch的迭代次数
+        # 计算每一个epoch的迭代次数
         return math.floor(len(self.datas) / float(self.batch_size))
 
     def __getitem__(self, index):
-        #生成每个batch数据，这里就根据自己对数据的读取方式进行发挥了
+        # 生成每个batch数据，这里就根据自己对数据的读取方式进行发挥了
         # 生成batch_size个索引
-
         """ 
         step = int(len(self.datas)/self.batch_size)-1
         if index > step :
           index=0
         """
-        batch_indexs = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+        batch_indexs = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
         # 根据索引获取datas集合中的数据
         batch_datas = [self.datas[k] for k in batch_indexs]
         """ 
@@ -210,34 +164,34 @@ class DataGenerator(tf.keras.utils.Sequence):
         return X, y
 
     def on_epoch_end(self):
-        #在每一次epoch结束是否需要进行一次随机，重新随机一下index
+        # 在每一次epoch结束是否需要进行一次随机，重新随机一下index
         if self.shuffle == True:
             np.random.shuffle(self.indexes)
 
     def ImportImage(self, filename):
-        image = sitk.ReadImage("drive/My Drive/DATA/inter/"+filename)
+        image = sitk.ReadImage("drive/My Drive/DATA/inter/" + filename)
         imagearry = sitk.GetArrayFromImage(image)
         if image.GetNumberOfComponentsPerPixel() == 1:
             imagearry = imagearry[..., np.newaxis]
         return imagearry
 
     def data_generation(self, batch_datas):
-        ps = self.paddingsize[::-1] # (x, y, z) -> (z, y, x) for np.array
+        ps = self.paddingsize[::-1]  # (x, y, z) -> (z, y, x) for np.array
         images = []
         labels = []
 
         # 生成数据
         for i, data in enumerate(batch_datas):
-            #x_train数据
+            # x_train数据
             image = self.ImportImage(data[0])
             image = image[ps[0]:-ps[0], ps[1]:-ps[1], ps[2]:-ps[2]]
             images.append(image)
-            
-            #y_train数据 
+
+            # y_train数据
             onehotlabel = self.ImportImage(data[1])
             onehotlabel = onehotlabel[ps[0]:-ps[0], ps[1]:-ps[1], ps[2]:-ps[2]]
             labels.append(onehotlabel)
-            
+
             """
             #For test
             image = self.ImportImage(self.datas[0][0])
@@ -247,110 +201,146 @@ class DataGenerator(tf.keras.utils.Sequence):
             onehotlabel = onehotlabel[ps[0]:-ps[0], ps[1]:-ps[1], ps[2]:-ps[2]]
             labels.append(onehotlabel)
             """
-            
-
-        #如果为多输出模型，Y的格式要变一下，外层list格式包裹numpy格式是list[numpy_out1,numpy_out2,numpy_out3]
+        # 如果为多输出模型，Y的格式要变一下，外层list格式包裹numpy格式是list[numpy_out1,numpy_out2,numpy_out3]
         return np.array(images), np.array(labels)
 
 
-def main(_):
-    #Build 3DU-net
-    matchobj = re.match("([0-9]+)x([0-9]+)x([0-9]+)", args.patchsize)
-    if matchobj is None:
-        print('[ERROR] Invalid patch size : {}'.format(args.patchsize))
-        return
-    patchsize = [ int(s) for s in matchobj.groups() ]
-    patchsize = tuple(patchsize)
+def start_train(logdir, train_file, val_file=None, batchsize=16, epochs=30, learningrate=1e-3, ):
+    # Build 3DU-net
 
+    patchsize = (44, 44, 28)
+    # read from config outputsize
     padding = 44
-    imagesize = tuple([ p + 2*padding for p in patchsize ]) 
+    imagesize = tuple([p + 2 * padding for p in patchsize])
     inputshape = imagesize + (1,)
-    nclasses = args.nclasses
+    nclasses = 9
+
     print("Input shape:", inputshape)
     print("Number of classes:", nclasses)
 
     inputs = tf.keras.layers.Input(shape=inputshape, name="input")
-    segmentation = Construct3DUnetModel(inputs, nclasses, args.use_bn, args.use_dropout)
+    segmentation = Construct3DUnetModel(inputs, nclasses, True, True)
 
-    model = tf.keras.models.Model(inputs, segmentation,name="3DUnet")
+    model = tf.keras.models.Model(inputs, segmentation, name="3DUnet")
     model.summary()
 
-    #Start training
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.allow_soft_placement = True
-    sess = tf.Session(config=config)
-    tf.keras.backend.set_session(sess)
+    # Start training
+    optimizer = tf.keras.optimizers.Adam(lr=learningrate)
+    model.compile(loss='sparse_categorical_crossentropy', optimizer=optimizer, metrics=[dice])
 
-    with tf.device('/device:GPU:{}'.format(args.gpuid)):
-        optimizer = tf.keras.optimizers.Adam(lr=args.learningrate)
-        model.compile(loss=weighted_crossentropy_loss, optimizer=optimizer, metrics=[dice])
-    
-    if args.outfile is not None:
-        with open(args.outfile, 'w') as f:
-            yamlobj = yaml.load(model.to_yaml())
-            yaml.dump(yamlobj, f)
-            
-    #get padding size
-    ps = np.array(model.output_shape[1:4])[::-1]
-    ips = np.array(model.input_shape[1:4])[::-1]
+    # get padding size
+    ps = np.array(model.output_shape[1:4])
+    ips = np.array(model.input_shape[1:4])
     paddingsize = ((ips - ps) / 2).astype(np.int)
 
-    #A retraining of interruption
-    if args.weightfile is None:
+    # A retraining of interruption
+    initial_epoch = 0
+    '''if args.weightfile is None:
         initial_epoch = 0
     else:
         model.load_weights(args.weightfile, by_name=True)
-        initial_epoch = args.initialepoch
+        initial_epoch = args.initialepoch'''
+
+    if not os.path.exists(logdir + '/model'):
+        os.makedirs(logdir + '/model')
+    latestfile = logdir + '/latestweights.hdf5'
+    bestfile = logdir + '/bestweights.hdf5'
+    tb_cbk = tf.keras.callbacks.TensorBoard(log_dir=logdir)
+    best_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=bestfile, save_best_only=True)  # , save_weights_only = True)
+    latest_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=latestfile)  # , save_weights_only = True)
+    every_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=logdir + '/model/model_{epoch:02d}_{val_loss:.2f}.hdf5')
+    callbacks = [tb_cbk, best_cbk, latest_cbk, every_cbk]
+
+    # data_file = "list/hist_train.txt"
+    # val_file = "list/hist_val.txt"
+
+    # read dataset
+    trainingdatalist = train_file
+    train_data = GenerateBatchData(trainingdatalist, paddingsize, batch_size=batchsize)
+    if val_file is not None:
+        testdatalist = val_file
+        # testdatalist = random.sample(testdatalist, int(len(testdatalist)*0.3))
+        validation_data = GenerateBatchData(testdatalist, paddingsize, batch_size=batchsize)
+        validation_steps = len(testdatalist) / batchsize
+    else:
+        validation_data = None
+        validation_steps = None
+
+    steps_per_epoch = len(trainingdatalist) / batchsize
+    print("Number of samples:", len(trainingdatalist))
+    print("Batch size:", batchsize)
+    print("Number of Epochs:", epochs)
+    print("Learning rate:", learningrate)
+    print("Number of Steps/epoch:", steps_per_epoch)
+
+    model.fit_generator(train_data,
+                        steps_per_epoch=steps_per_epoch,
+                        epochs=epochs,
+                        callbacks=callbacks,
+                        validation_data=validation_data,
+                        validation_steps=validation_steps,
+                        initial_epoch=initial_epoch)
 
 
-    if not os.path.exists(args.logdir+'/model'):
-        os.makedirs(args.logdir+'/model')
-    latestfile = args.logdir + '/latestweights.hdf5'
-    bestfile = args.logdir + '/bestweights.hdf5'
-    tb_cbk = tf.keras.callbacks.TensorBoard(log_dir=args.logdir)
-    best_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=bestfile, save_best_only = True)#, save_weights_only = True)
-    latest_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=latestfile)#, save_weights_only = True)
-    every_cbk = tf.keras.callbacks.ModelCheckpoint(filepath = args.logdir + '/model/model_{epoch:02d}_{val_loss:.2f}.hdf5')
-    callbacks = [tb_cbk,best_cbk,latest_cbk,every_cbk]
+def train(config_path):
+    c = UConfig(config_path)
+    train_list = ReadSliceDataList(c, 'train')
+    val_list = ReadSliceDataList(c, 'val')
+
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    tf.config.set_soft_device_placement(True)
+    print("Num GPUs Available: ", len(gpus))
+    if gpus:
+        try:
+            # Currently, memory growth needs to be the same across GPUs
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            # Memory growth must be set before GPUs have been initialized
+            print(e)
+
+    start_train(c.log_dir, train_list, val_list)
+    print(len(train_list), len(val_list), c.log_dir)
+    print(train_list[:10])
 
 
-    hist_all = ['01','02','03','04','05','06','07','08','09','10']
-    for histid in hist_all:
-        data_file = "list/hist"+histid+"_train.txt"
-        val_file = "list/hist"+histid+"_val.txt"
-        #read dataset
-        trainingdatalist = ReadSliceDataList(data_file)
-        train_data = GenerateBatchData(trainingdatalist, paddingsize, batch_size = args.batchsize)
-        if args.testfile is not None:
-            testdatalist = ReadSliceDataList(val_file)
-            #testdatalist = random.sample(testdatalist, int(len(testdatalist)*0.3))
-            validation_data = GenerateBatchData(testdatalist, paddingsize, batch_size = args.batchsize)
-            validation_steps = len(testdatalist) / args.batchsize
-        else:
-            validation_data = None
-            validation_steps = None
+def ReadSliceDataList(c: UConfig, train_val):
+    data_list_path = os.path.join('./lists', c.train_data)
+    label_list_path = os.path.join('./lists', c.train_label)
+    datalist = []
+    if train_val == 'train':
+        num_data_lists = c.train_list
+    else:
+        num_data_lists = c.val_list
 
-        steps_per_epoch = len(trainingdatalist) / args.batchsize
-        print ("Number of samples:", len(trainingdatalist))
-        print ("Batch size:", args.batchsize)
-        print ("Number of Epochs:", args.epochs)
-        print ("Learning rate:", args.learningrate)
-        print ("Number of Steps/epoch:", steps_per_epoch)
+    for i in num_data_lists:
+        dfname = os.path.join(data_list_path, i)
+        lfname = os.path.join(label_list_path, i)
+        with open(dfname) as f:
+            datas = f.readlines()
+        with open(lfname) as f:
+            labels = f.readlines()
+        for imagefile, labelfile in zip(datas, labels):
+            imagefile = imagefile.replace("\\\\", "\\")
+            imagefile = imagefile.replace("\n", "")
+            labelfile = labelfile.replace("\\\\", "\\")
+            labelfile = labelfile.replace("\n", "")
+            datalist.append((imagefile, labelfile))
 
-        #with tf.device('/device:GPU:{}'.format(args.gpuid)):
-        model.fit_generator(train_data,
-                steps_per_epoch = steps_per_epoch,
-                epochs = 5,
-                callbacks=callbacks,
-                validation_data = validation_data,
-                validation_steps = validation_steps,
-                initial_epoch = initial_epoch )
-        
+    return datalist
 
-    tf.keras.backend.clear_session()
+
+def ParseArgs():
+    parser = argparse.ArgumentParser(description='This is a build 3D_U_Net program')
+    parser.add_argument("config_path", help="Input config file")
+    parser.add_argument("-f", "--force", help="over write on old file if exist")
+    parser.add_argument("--noLabel", help="not extract label file", dest='do_label', action='store_false')
+    myargs = parser.parse_args()
+    return myargs
 
 
 if __name__ == '__main__':
     args = ParseArgs()
-    tf.app.run(main=main, argv=[sys.argv[0]])
+    train(args.config_path)
