@@ -10,9 +10,12 @@ class UConfig:
 
         self.input_shape = self.__get_shape("input_shape")
         self.output_shape = self.__get_shape("output_shape")
+        self.padding_type = self.__try_get("all","padding_type")
         self.data_name = self.conf.get("all", "data_name")
-        self.is_label = self.conf.get("all", "is_label")
+        self.is_label = self.__try_get("all", "is_label")
         self.step_scale = float(self.conf.get("all", "step_scale"))
+        self.batch_size = int(self.__try_get("all", "batch_size"))
+
         if self.conf.get("all", "mask_name") is 'None':
             self.mask_name = None
         else:

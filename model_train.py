@@ -9,10 +9,12 @@ from tensorflow import name_scope
 import argparse
 import random
 
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
-def CreateConv3DBlock(x, filters, n=2, use_bn=True, apply_pooling=True, name='convblock'):
+
+def CreateConv3DBlock(x, filters, n=2, use_bn=True, apply_pooling=True, name='convblock', padding='valid'):
     for i in range(n):
-        x = klayers.Conv3D(filters[i], (3, 3, 3), padding='valid', name=name + '_conv' + str(i + 1))(x)
+        x = klayers.Conv3D(filters[i], (3, 3, 3), padding=padding, name=name + '_conv' + str(i + 1))(x)
         if use_bn:
             x = klayers.BatchNormalization(name=name + '_BN' + str(i + 1))(x)
         x = klayers.Activation('relu', name=name + '_relu' + str(i + 1))(x)
@@ -25,7 +27,7 @@ def CreateConv3DBlock(x, filters, n=2, use_bn=True, apply_pooling=True, name='co
     return x, convresult
 
 
-def CreateUpConv3DBlock(x, contractpart, filters, n=2, use_bn=True, name='upconvblock'):
+def CreateUpConv3DBlock(x, contractpart, filters, n=2, use_bn=True, name='upconvblock',padding='valid'):
     # upconv x
     x = klayers.Conv3DTranspose((int)(x.shape[-1]), (2, 2, 2), strides=(2, 2, 2), padding='same', use_bias=False,
                                 name=name + '_upconv')(x)
@@ -42,7 +44,7 @@ def CreateUpConv3DBlock(x, contractpart, filters, n=2, use_bn=True, name='upconv
 
     # conv x 2 times
     for i in range(n):
-        x = klayers.Conv3D(filters[i], (3, 3, 3), padding='valid', name=name + '_conv' + str(i + 1))(x)
+        x = klayers.Conv3D(filters[i], (3, 3, 3), padding=padding, name=name + '_conv' + str(i + 1))(x)
         if use_bn:
             x = klayers.BatchNormalization(name=name + '_BN' + str(i + 1))(x)
         x = klayers.Activation('relu', name=name + '_relu' + str(i + 1))(x)
@@ -50,31 +52,31 @@ def CreateUpConv3DBlock(x, contractpart, filters, n=2, use_bn=True, name='upconv
     return x
 
 
-def Construct3DUnetModel(input_images, nclasses, use_bn=True, use_dropout=True):
+def Construct3DUnetModel(input_images, nclasses, use_bn=True, use_dropout=True, padding='valid'):
     with name_scope("contract1"):
-        x, contract1 = CreateConv3DBlock(input_images, (32, 64), n=2, use_bn=use_bn, name='contract1')
+        x, contract1 = CreateConv3DBlock(input_images, (32, 64), n=2, use_bn=use_bn, name='contract1', padding=padding)
 
     with name_scope("contract2"):
-        x, contract2 = CreateConv3DBlock(x, (64, 128), n=2, use_bn=use_bn, name='contract2')
+        x, contract2 = CreateConv3DBlock(x, (64, 128), n=2, use_bn=use_bn, name='contract2', padding=padding)
 
     with name_scope("contract3"):
-        x, contract3 = CreateConv3DBlock(x, (128, 256), n=2, use_bn=use_bn, name='contract3')
+        x, contract3 = CreateConv3DBlock(x, (128, 256), n=2, use_bn=use_bn, name='contract3', padding=padding)
 
     with name_scope("contract4"):
-        x, _ = CreateConv3DBlock(x, (256, 512), n=2, use_bn=use_bn, apply_pooling=False, name='contract4')
+        x, _ = CreateConv3DBlock(x, (256, 512), n=2, use_bn=use_bn, apply_pooling=False, name='contract4', padding=padding)
 
     with name_scope("dropout"):
         if use_dropout:
             x = klayers.Dropout(0.5, name='dropout')(x)
 
     with name_scope("expand3"):
-        x = CreateUpConv3DBlock(x, [contract3], (256, 256), n=2, use_bn=use_bn, name='expand3')
+        x = CreateUpConv3DBlock(x, [contract3], (256, 256), n=2, use_bn=use_bn, name='expand3', padding=padding)
 
     with name_scope("expand2"):
-        x = CreateUpConv3DBlock(x, [contract2], (128, 128), n=2, use_bn=use_bn, name='expand2')
+        x = CreateUpConv3DBlock(x, [contract2], (128, 128), n=2, use_bn=use_bn, name='expand2', padding=padding)
 
     with name_scope("expand1"):
-        x = CreateUpConv3DBlock(x, [contract1], (64, 64), n=2, use_bn=use_bn, name='expand1')
+        x = CreateUpConv3DBlock(x, [contract1], (64, 64), n=2, use_bn=use_bn, name='expand1', padding=padding)
 
     with name_scope("segmentation"):
         layername = 'segmentation_{}classes'.format(nclasses)
@@ -95,7 +97,7 @@ def dice(y_true, y_pred):
     return dice
 
 
-def ImportImage(filename):
+def ImportImage(filename, data_type):
     image = sitk.ReadImage(filename)
     imagearry = sitk.GetArrayFromImage(image)
     if image.GetNumberOfComponentsPerPixel() == 1:
@@ -104,7 +106,7 @@ def ImportImage(filename):
 
 
 def GenerateBatchData(datalist, paddingsize, batch_size=32):
-    ps = paddingsize[::-1]  # (x, y, z) -> (z, y, x) for np.array
+    ps = paddingsize
     # j = 0
 
     while True:
@@ -116,15 +118,28 @@ def GenerateBatchData(datalist, paddingsize, batch_size=32):
             outputlist = []
 
             for idx in indices[i:i + batch_size]:
-                image = ImportImage(datalist[idx][0])
-                onehotlabel = ImportImage(datalist[idx][1])
-
+                image = ImportImage(datalist[idx][0], 'ct')
+                onehotlabel = ImportImage(datalist[idx][1], 'label')
                 onehotlabel = onehotlabel[ps[0]:-ps[0], ps[1]:-ps[1], ps[2]:-ps[2]]
                 imagelist.append(image)
                 outputlist.append(onehotlabel)
 
             yield (np.array(imagelist), np.array(outputlist))
 
+def GenerateBatchData2(datalist, paddingsize=[44, 44, 44]):
+    ps = paddingsize
+    # j = 0
+
+    while True:
+        indices = list(range(len(datalist)))
+        random.shuffle(indices)
+
+        for idx in range(0, len(indices)):
+            image = ImportImage(datalist[idx][0], 'ct')
+            onehotlabel = ImportImage(datalist[idx][1], 'label')
+            onehotlabel = onehotlabel[ps[0]:-ps[0], ps[1]:-ps[1], ps[2]:-ps[2]]
+
+            yield (np.array(image), np.array(onehotlabel))
 
 class DataGenerator(tf.keras.utils.Sequence):
 
@@ -205,7 +220,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         return np.array(images), np.array(labels)
 
 
-def start_train(logdir, train_file, val_file=None, batchsize=16, epochs=30, learningrate=1e-3, ):
+def start_train(logdir, train_file, val_file=None, batchsize=3, epochs=30, learningrate=1e-3, padding_type='valid'):
     # Build 3DU-net
 
     patchsize = (44, 44, 28)
@@ -219,19 +234,20 @@ def start_train(logdir, train_file, val_file=None, batchsize=16, epochs=30, lear
     print("Number of classes:", nclasses)
 
     inputs = tf.keras.layers.Input(shape=inputshape, name="input")
-    segmentation = Construct3DUnetModel(inputs, nclasses, True, True)
+    segmentation = Construct3DUnetModel(inputs, nclasses, True, True, padding=padding_type)
 
     model = tf.keras.models.Model(inputs, segmentation, name="3DUnet")
     model.summary()
 
     # Start training
     optimizer = tf.keras.optimizers.Adam(lr=learningrate)
-    model.compile(loss='sparse_categorical_crossentropy', optimizer=optimizer, metrics=[dice])
+    model.compile(loss='categorical_crossentropy', optimizer=optimizer, metrics=[dice])
 
     # get padding size
-    ps = np.array(model.output_shape[1:4])
-    ips = np.array(model.input_shape[1:4])
+    ps = np.array(patchsize)
+    ips = np.array(imagesize)
     paddingsize = ((ips - ps) / 2).astype(np.int)
+    print("padding Size:", paddingsize)
 
     # A retraining of interruption
     initial_epoch = 0
@@ -249,18 +265,24 @@ def start_train(logdir, train_file, val_file=None, batchsize=16, epochs=30, lear
     best_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=bestfile, save_best_only=True)  # , save_weights_only = True)
     latest_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=latestfile)  # , save_weights_only = True)
     every_cbk = tf.keras.callbacks.ModelCheckpoint(filepath=logdir + '/model/model_{epoch:02d}_{val_loss:.2f}.hdf5')
-    callbacks = [tb_cbk, best_cbk, latest_cbk, every_cbk]
+    callbacks = [tb_cbk, best_cbk, latest_cbk]#, every_cbk]
 
     # data_file = "list/hist_train.txt"
     # val_file = "list/hist_val.txt"
 
     # read dataset
     trainingdatalist = train_file
-    train_data = GenerateBatchData(trainingdatalist, paddingsize, batch_size=batchsize)
+    # train_data = GenerateBatchData(trainingdatalist, paddingsize, batch_size=batchsize)
+    train_data = tf.data.Dataset.from_generator(lambda: GenerateBatchData2(trainingdatalist),
+                                                output_types=(tf.int32, tf.int32),output_shapes=((132, 132, 116, 1),(44, 44, 28, 9)))
+    train_data = train_data.batch(batchsize)
     if val_file is not None:
         testdatalist = val_file
         # testdatalist = random.sample(testdatalist, int(len(testdatalist)*0.3))
-        validation_data = GenerateBatchData(testdatalist, paddingsize, batch_size=batchsize)
+        # validation_data = GenerateBatchData(testdatalist, paddingsize, batch_size=batchsize)
+        validation_data = tf.data.Dataset.from_generator(lambda: GenerateBatchData2(testdatalist),
+                                       output_types=(tf.int32, tf.int32),output_shapes=((132, 132, 116, 1),(44, 44, 28, 9)))
+        validation_data = validation_data.batch(batchsize)
         validation_steps = len(testdatalist) / batchsize
     else:
         validation_data = None
@@ -273,13 +295,13 @@ def start_train(logdir, train_file, val_file=None, batchsize=16, epochs=30, lear
     print("Learning rate:", learningrate)
     print("Number of Steps/epoch:", steps_per_epoch)
 
-    model.fit_generator(train_data,
-                        steps_per_epoch=steps_per_epoch,
-                        epochs=epochs,
-                        callbacks=callbacks,
-                        validation_data=validation_data,
-                        validation_steps=validation_steps,
-                        initial_epoch=initial_epoch)
+    model.fit(train_data,
+              steps_per_epoch=steps_per_epoch,
+              epochs=epochs,
+              callbacks=callbacks,
+              validation_data=validation_data,
+              validation_steps=validation_steps,
+              initial_epoch=initial_epoch)
 
 
 def train(config_path):
@@ -287,9 +309,9 @@ def train(config_path):
     train_list = ReadSliceDataList(c, 'train')
     val_list = ReadSliceDataList(c, 'val')
 
-    gpus = tf.config.experimental.list_physical_devices('GPU')
+    # gpus = tf.config.experimental.list_physical_devices('GPU')
     tf.config.set_soft_device_placement(True)
-    print("Num GPUs Available: ", len(gpus))
+    '''print("Num GPUs Available: ", len(gpus))
     if gpus:
         try:
             # Currently, memory growth needs to be the same across GPUs
@@ -299,9 +321,9 @@ def train(config_path):
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
-            print(e)
+            print(e)'''
 
-    start_train(c.log_dir, train_list, val_list)
+    start_train(c.log_dir, train_list, val_file=val_list, batchsize=c.batch_size,padding_type=c.padding_type)
     print(len(train_list), len(val_list), c.log_dir)
     print(train_list[:10])
 
